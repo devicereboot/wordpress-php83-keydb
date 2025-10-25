@@ -2,9 +2,9 @@
 FROM wordpress:php8.3-fpm
 
 LABEL maintainer="Device Reboot / Motive Cyber"
-LABEL description="WordPress + PHP8.3 + Nginx + Redis + Imagick build for CapRover"
+LABEL description="WordPress + PHP8.3 + Nginx + Redis + Imagick + APCu + Auto Redis Connect (CapRover Ready)"
 
-# ---- Install Nginx and required libraries ----
+# ---- Install Nginx and dependencies ----
 RUN apt-get update && \
     apt-get install -y nginx curl libzip-dev libjpeg-dev libpng-dev \
     libwebp-dev libmagickwand-dev libonig-dev libxml2-dev libmemcached-dev && \
@@ -17,7 +17,18 @@ RUN apt-get update && \
 RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
     chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
 
-# ---- Simple Nginx config ----
+# ---- Auto-Configure Redis in wp-config.php ----
+RUN echo '\n\
+if ( getenv("REDIS_HOST") ) {\n\
+    define("WP_REDIS_HOST", getenv("REDIS_HOST"));\n\
+    define("WP_REDIS_PORT", getenv("REDIS_PORT") ?: 6379);\n\
+    if ( getenv("REDIS_PASSWORD") ) define("WP_REDIS_PASSWORD", getenv("REDIS_PASSWORD"));\n\
+    define("WP_REDIS_DISABLED", false);\n\
+    define("WP_CACHE", true);\n\
+}\n\
+' >> /usr/src/wordpress/wp-config-docker.php
+
+# ---- Simple Nginx configuration ----
 RUN mkdir -p /run/php && \
     echo 'server { \
         listen 80; \
@@ -44,4 +55,3 @@ EXPOSE 80
 
 # ---- Start Nginx + PHP-FPM ----
 CMD service nginx start && php-fpm -F
-
