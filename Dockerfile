@@ -2,9 +2,9 @@
 FROM wordpress:php8.3-fpm
 
 LABEL maintainer="Device Reboot / Motive Cyber"
-LABEL description="Optimized WordPress (PHP 8.3 FPM + Nginx + Imagick + Redis) build for CapRover"
+LABEL description="WordPress + PHP8.3 + Nginx + Redis + Imagick build for CapRover"
 
-# ---- Install required packages ----
+# ---- Install Nginx and required libraries ----
 RUN apt-get update && \
     apt-get install -y nginx curl libzip-dev libjpeg-dev libpng-dev \
     libwebp-dev libmagickwand-dev libonig-dev libxml2-dev libmemcached-dev && \
@@ -17,7 +17,7 @@ RUN apt-get update && \
 RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
     chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
 
-# ---- Nginx configuration ----
+# ---- Simple Nginx config ----
 RUN mkdir -p /run/php && \
     echo 'server { \
         listen 80; \
@@ -32,14 +32,14 @@ RUN mkdir -p /run/php && \
         location ~ /\.ht { deny all; } \
     }' > /etc/nginx/sites-available/default
 
-# ---- Performance tuning ----
+# ---- Tune OPcache ----
 RUN echo "opcache.memory_consumption=256\n\
 opcache.interned_strings_buffer=16\n\
 opcache.max_accelerated_files=20000\n\
 opcache.validate_timestamps=1\n\
 opcache.revalidate_freq=2" > /usr/local/etc/php/conf.d/zz-opcache.ini
 
-# ---- Expose Port ----
+# ---- Expose HTTP ----
 EXPOSE 80
 
 # ---- Start Nginx + PHP-FPM ----
