@@ -1,62 +1,86 @@
-# ---- Base WordPress + PHP 8.3 FPM ----
-FROM wordpress:php8.3-fpm
+# ================================================================
+# Device Reboot WordPress 8.3 + KeyDB/Redis + Imagick (Slim Build)
+# ================================================================
 
-LABEL maintainer="Device Reboot / Motive Cyber"
-LABEL description="WordPress + PHP8.3 + Nginx + Redis + Imagick + APCu + Auto Redis Connect (CapRover Ready)"
+FROM php:8.3-fpm-bookworm
 
-# ---- Install Nginx and dependencies ----
-RUN apt-get update && \
-    apt-get install -y nginx curl libzip-dev libjpeg-dev libpng-dev \
-    libwebp-dev libmagickwand-dev libonig-dev libxml2-dev libmemcached-dev && \
-    docker-php-ext-install zip gd opcache intl mbstring bcmath exif mysqli && \
-    pecl install redis imagick apcu && \
-    docker-php-ext-enable redis imagick apcu && \
-    rm -rf /var/lib/apt/lists/*
+LABEL maintainer="Device Reboot <support@devicereboot.com>"
+LABEL description="Optimized WordPress (PHP 8.3 FPM) with Nginx, Imagick, Redis, APCu, and WP-CLI for CapRover"
 
-# ---- Add WP-CLI ----
-RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && \
-    chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
+# ------------------------------------------------
+# 1. Install system dependencies
+# ------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx curl zip unzip git less vim nano \
+    libjpeg-dev libpng-dev libwebp-dev libfreetype6-dev \
+    libmagickwand-dev libzip-dev libonig-dev libxml2-dev \
+    libmemcached-dev mariadb-client \
+ && rm -rf /var/lib/apt/lists/*
 
-# ---- Auto-Configure Redis in wp-config.php ----
-RUN echo '\n\
-if ( getenv("REDIS_HOST") ) {\n\
-    define("WP_REDIS_HOST", getenv("REDIS_HOST"));\n\
-    define("WP_REDIS_PORT", getenv("REDIS_PORT") ?: 6379);\n\
-    if ( getenv("REDIS_PASSWORD") ) define("WP_REDIS_PASSWORD", getenv("REDIS_PASSWORD"));\n\
-    define("WP_REDIS_DISABLED", false);\n\
-    define("WP_CACHE", true);\n\
-}\n\
-' >> /usr/src/wordpress/wp-config-docker.php
+# ------------------------------------------------
+# 2. Configure PHP extensions
+# ------------------------------------------------
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+ && docker-php-ext-install gd zip opcache intl mbstring bcmath exif mysqli pdo_mysql \
+ && pecl install redis imagick apcu \
+ && docker-php-ext-enable redis imagick apcu
 
-# ---- Nginx configuration (correct FPM socket) ----
-RUN mkdir -p /var/run/php && \
-    echo 'server { \
-        listen 80; \
-        server_name _; \
-        root /var/www/html; \
-        index index.php index.html; \
-        location / { try_files $uri $uri/ /index.php?$args; } \
-        location ~ \.php$$ { \
-            include snippets/fastcgi-php.conf; \
-            fastcgi_pass unix:/var/run/php/php-fpm.sock; \
-            fastcgi_index index.php; \
-        } \
-        location ~ /\.ht { deny all; } \
-    }' > /etc/nginx/sites-available/default
+# ------------------------------------------------
+# 3. Configure PHP runtime
+# ------------------------------------------------
+COPY zz-php-opts.ini /usr/local/etc/php/conf.d/zz-php-opts.ini
+RUN echo "memory_limit=512M\nupload_max_filesize=64M\npost_max_size=64M\nmax_execution_time=300" \
+    > /usr/local/etc/php/conf.d/99-device-reboot.ini
 
-# ---- Tune OPcache ----
-RUN echo "opcache.memory_consumption=256\n\
-opcache.interned_strings_buffer=16\n\
-opcache.max_accelerated_files=20000\n\
-opcache.validate_timestamps=1\n\
-opcache.revalidate_freq=2" > /usr/local/etc/php/conf.d/zz-opcache.ini
+# ------------------------------------------------
+# 4. Install WP-CLI
+# ------------------------------------------------
+RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
+ && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
 
-# ---- Expose HTTP ----
+# ------------------------------------------------
+# 5. Nginx configuration
+# ------------------------------------------------
+RUN mkdir -p /run/php /var/run/php /var/www/html
+
+# Remove default site
+RUN rm -f /etc/nginx/sites-enabled/default
+
+# Add optimized WordPress Nginx config
+RUN echo 'server {\n\
+    listen 80;\n\
+    root /var/www/html;\n\
+    index index.php index.html;\n\
+    server_name _;\n\
+\n\
+    location / {\n\
+        try_files $uri $uri/ /index.php?$args;\n\
+    }\n\
+\n\
+    location ~ \.php$ {\n\
+        include snippets/fastcgi-php.conf;\n\
+        fastcgi_pass 127.0.0.1:9000;\n\
+    }\n\
+\n\
+    location ~* \.(jpg|jpeg|png|gif|ico|css|js|webp)$ {\n\
+        expires max;\n\
+        log_not_found off;\n\
+    }\n\
+}' > /etc/nginx/sites-enabled/wordpress.conf
+
+# ------------------------------------------------
+# 6. Healthcheck
+# ------------------------------------------------
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
+ CMD curl -fsS http://localhost || exit 1
+
+# ------------------------------------------------
+# 7. Entrypoint
+# ------------------------------------------------
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 80
+WORKDIR /var/www/html
 
-# ---- Health check (optional) ----
-HEALTHCHECK --interval=30s --timeout=5s \
-  CMD curl -f http://localhost/ || exit 1
-
-# ---- Start Nginx + PHP-FPM ----
-CMD service nginx start && php-fpm -F
+CMD ["/entrypoint.sh"]
