@@ -28,8 +28,8 @@ if ( getenv("REDIS_HOST") ) {\n\
 }\n\
 ' >> /usr/src/wordpress/wp-config-docker.php
 
-# ---- Simple Nginx configuration ----
-RUN mkdir -p /run/php && \
+# ---- Nginx configuration (correct FPM socket) ----
+RUN mkdir -p /var/run/php && \
     echo 'server { \
         listen 80; \
         server_name _; \
@@ -38,7 +38,8 @@ RUN mkdir -p /run/php && \
         location / { try_files $uri $uri/ /index.php?$args; } \
         location ~ \.php$$ { \
             include snippets/fastcgi-php.conf; \
-            fastcgi_pass unix:/run/php/php-fpm.sock; \
+            fastcgi_pass unix:/var/run/php/php-fpm.sock; \
+            fastcgi_index index.php; \
         } \
         location ~ /\.ht { deny all; } \
     }' > /etc/nginx/sites-available/default
@@ -52,6 +53,10 @@ opcache.revalidate_freq=2" > /usr/local/etc/php/conf.d/zz-opcache.ini
 
 # ---- Expose HTTP ----
 EXPOSE 80
+
+# ---- Health check (optional) ----
+HEALTHCHECK --interval=30s --timeout=5s \
+  CMD curl -f http://localhost/ || exit 1
 
 # ---- Start Nginx + PHP-FPM ----
 CMD service nginx start && php-fpm -F
